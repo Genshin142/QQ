@@ -1,0 +1,126 @@
+# QQ 项目 JSON 通讯协议设计文档
+
+本文档详细说明了 QQ 服务端（`QQ_api`）与客户端之间通讯的应用层协议设计。该协议基于 TCP 长连接，采用“头部长度 + JSON 负载”的结构。
+
+## 1. 传输层封装 (Packet Structure)
+
+所有数据包在发送时均包含两部分，以解决 TCP 的粘包和半包问题：
+
+| 字节偏移 | 长度 | 说明 |
+| :--- | :--- | :--- |
+| 0 - 3 | 4 字节 | **包头**：存储后续 JSON 数据的长度信息（大端字节序，uint32）。 |
+| 4 - N | N 字节 | **负载**：UTF-8 编码的 JSON 字符串。 |
+
+---
+
+## 2. 基础协议规范 (Common Fields)
+
+所有 JSON 报文均包含一个核心字段来标识业务类型：
+*   **`type`** (String): 接口类型标识。
+
+---
+
+## 3. 业务接口详情
+
+### 3.1 身份与账户
+#### [登录]
+- **请求 ([login](file:///e:/TraeWorks/linux%E9%A2%84%E7%BA%A6%E7%B3%BB%E7%BB%9F/ser.cpp#330-361))**:
+  - `type` (String): "login"
+  - `phone` (String): 手机号
+  - `password` (String): 明文或初步加密密码
+- **响应 (`login_res`)**:
+  - `type` (String): "login_res"
+  - `success` (Bool): 是否成功
+  - `userId` (String): [成功时] 用户唯内部 ID
+  - `name` (String): [成功时] 用户昵称
+  - `phone` (String): [成功时] 用户手机号
+  - [error](file:///e:/TraeWorks/linux%E9%A2%84%E7%BA%A6%E7%B3%BB%E7%BB%9F/ser.cpp#148-155) (String): [失败时] 错误描述
+
+#### [注册]
+- **请求 ([register](file:///e:/QT/work/QQ_api/server.h#47-50))**:
+  - `type` (String): "register"
+  - `phone` (String)
+  - `name` (String)
+  - `password` (String)
+- **响应 (`register_res`)**:
+  - `type` (String): "register_res"
+  - `success` (Bool)
+  - `userId` (String): [成功时] 分配的新 ID
+  - [error](file:///e:/TraeWorks/linux%E9%A2%84%E7%BA%A6%E7%B3%BB%E7%BB%9F/ser.cpp#148-155) (String): [失败时] 错误信息
+
+#### [用户识别/长连接映射]
+- **请求 (`identify`)**:
+  - `type` (String): "identify"
+  - `userId` (String): 登录成功后的用户 ID
+
+---
+
+### 3.2 消息通讯
+#### [发送消息]
+- **请求 (`send_message`)**:
+  - `type` (String): "send_message"
+  - `fromUserId` (String)
+  - `toUserId` (String): 接收者 ID ("0000" 为群聊)
+  - `content` (String): 消息文本
+- **响应 (给发送方)**:
+  - `type` (String): "send_message_res"
+  - `success` (Bool)
+  - [id](file:///e:/QT/work/QQ_api/server.cpp#17-34) (String): 数据库生成的唯一消息 ID
+- **推送 (给接收方)**:
+  - `type` (String): "new_message"
+  - [id](file:///e:/QT/work/QQ_api/server.cpp#17-34) (String)
+  - `fromUserId` (String)
+  - `content` (String)
+  - `time` (String): 格式 "yyyy-MM-dd hh:mm:ss"
+  - `isGroup` (Bool): 是否为群聊消息
+
+#### [拉取历史消息]
+- **请求 (`get_messages`)**:
+  - `type` (String): "get_messages"
+  - `fromUserId` (String)
+  - `toUserId` (String)
+  - `lastMessageId` (String): 起始消息 ID，用于分页或增量拉取
+- **响应**:
+  - `type` (String): "get_messages_res"
+  - `success` (Bool)
+  - `messages` (Array): 消息对象数组
+  - **Array 内部元素 (Object)**:
+    - [id](file:///e:/QT/work/QQ_api/server.cpp#17-34) (String)
+    - `fromUserId` (String)
+    - `content` (String)
+    - `time` (String)
+
+---
+
+### 3.3 好友与用户管理
+#### [获取好友/用户列表]
+- **请求 (`get_all_users`)**:
+  - `type` (String): "get_all_users"
+- **响应**:
+  - `type` (String): "get_all_users_res"
+  - `success` (Bool)
+  - `users` (Array): 用户信息数组
+  - **Array 内部元素 (Object)**:
+    - `user_id` (String)
+    - `name` (String)
+    - `phone` (String)
+
+---
+
+### 3.4 媒体管理
+#### [头像上传]
+- **请求 (`upload_avatar`)**: `{"type": "upload_avatar", "user_id": "...", "avatar_data": "Base64字符串"}`
+- **响应**: `{"type": "upload_avatar_res", "success": true}`
+
+#### [头像下载]
+- **请求 (`get_avatar`)**: `{"type": "get_avatar", "user_id": "..."}`
+- **响应**: `{"type": "get_avatar_res", "success": true, "avatar_data": "Base64字符串"}`
+
+---
+
+## 4. 协议设计要点总结
+
+1.  **Object 驱动业务**：顶层报文始终是 `QJsonObject`，便于使用 `key` 快速检索 `type` 进行业务分发。
+2.  **Array 驱动列表**：在涉及好友列表、消息列表等批量数据时，使用 `QJsonArray` 进行嵌套。
+3.  **Base64 编码**：二进制图片数据统一转换为完整的字符串后再嵌入 JSON Object 中，保证了文本协议的兼容性。
+4.  **无形态分流**：服务端通过解析 `type` 字段，决定分发给线程池中的哪一个具体的解析函数（如 [check_login](file:///e:/QT/work/QQ_api/server.cpp#473-516) 或 [handleSendMessage](file:///e:/QT/work/QQ_api/server.h#60-63)）。
