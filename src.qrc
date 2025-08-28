@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>images/my_image.jpg</file>
+        <file>images/QQ.png</file>
+        <file>images/hide_password.png</file>
+        <file>images/show_password.png</file>
+        <file>images/chat.png</file>
+        <file>images/contactPerson.png</file>
+        <file>images/QQ_label.png</file>
+        <file>images/QQ_background.png</file>
+        <file>images/group_icon.png</file>
+    </qresource>
+</RCC>
